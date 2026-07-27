@@ -204,13 +204,11 @@ The project includes several visualizations, including:
 
 ## Future Improvements
 
-- Random Forest Classifier
+
 - XGBoost
-- Support Vector Machine
-- Neural Networks
-- Hyperparameter Optimization
-- Cross Validation
-- Model Explainability with SHAP
+- Support Vector Machine ##incase of any future improvement yeah we gonna test it out
+- and see if i will perform good among the four model we tested out first 
+
 
 ---
 
