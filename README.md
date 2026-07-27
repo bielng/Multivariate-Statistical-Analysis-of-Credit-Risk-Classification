@@ -108,13 +108,13 @@ Multivariate-Statistical-Analysis-Credit-Risk/
 Clone the repository:
 
 ```bash
-git clone https://github.com/yourusername/Multivariate-Statistical-Analysis-Credit-Risk.git
+git clone https://github.com/bielng/logistic_regression_presentation_iteso.git
 ```
 
 Navigate to the project directory:
 
 ```bash
-cd Multivariate-Statistical-Analysis-Credit-Risk
+cd logistic_regression_presentation_iteso
 ```
 
 Create a virtual environment:
