@@ -208,7 +208,7 @@ The project includes several visualizations, including:
 
 ## Authors
 
----
+
 
 **Taban James Biel Ngunar**
 Data Science & Engineering Student
