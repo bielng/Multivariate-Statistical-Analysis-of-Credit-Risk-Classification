@@ -208,12 +208,16 @@ The project includes several visualizations, including:
 
 ## Authors
 
-**Taban James Biel Ngunar**  
-Data Science & Engineering Student  
-GitHub: [https://github.com/bielng](https://github.com/bielng)  
+---
+
+**Taban James Biel Ngunar**
+Data Science & Engineering Student
+
+GitHub: [https://github.com/bielng](https://github.com/bielng)
+
 Portfolio: [https://ngunar.vercel.app](https://ngunar.vercel.app)
 
-**Luis Alfonso Díaz Solórzano** <br>
+**Luis Alfonso Díaz Solórzano**
 Nanotechnology Engineering, ITESO Guadalajara
 
 ---
