@@ -215,7 +215,7 @@ GitHub: https://github.com/bielng
 
 Portfolio: https://ngunar.vercel.app
 
-**Luis** 
+**Luis Alfonso Díaz Solórzano** 
 Nanotechnology Engineering, ITESO Guadalajara
 
 ---
