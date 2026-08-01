@@ -91,7 +91,8 @@ Multivariate-Statistical-Analysis-Credit-Risk/
 ├── credit_train_clean.7z            # Compressed cleaned dataset
 ├── proyecto_final.ipynb             # Main Jupyter Notebook
 ├── proyecto_final_analisis_multivariable.qmd # Quarto document file
-├── index.html                       # HTML report output
+├── index.html                      # HTML report output
+├── requirements.txt                 # libraries and dependencies                      
 └── README.md
 ```
 
