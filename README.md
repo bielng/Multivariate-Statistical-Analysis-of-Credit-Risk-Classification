@@ -98,6 +98,7 @@ Multivariate-Statistical-Analysis-Credit-Risk/
 │
 ├── requirements.txt *first lines of the notebook"
 ├── README.md
+├── qmd file
 └── LICENSE
 ```
 
@@ -222,6 +223,7 @@ GitHub: https://github.com/bielng
 Portfolio: https://ngunar.vercel.app
 
 **Luis** 
+Nanotechnology Engineering, ITESO Guadalajara
 
 ---
 
