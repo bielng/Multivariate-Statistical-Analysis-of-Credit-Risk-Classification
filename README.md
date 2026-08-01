@@ -88,18 +88,11 @@ The following statistical and machine learning techniques were applied:
 ```text
 Multivariate-Statistical-Analysis-Credit-Risk/
 │
-├── data/
-│   ├── zip file
-│
-├── notebook file
-│
-├── report/
-│   └── Final_Report.pdf *  html url link
-│
-├── requirements.txt *first lines of the notebook"
-├── README.md
-├── qmd file
-└── LICENSE
+├── credit_train_clean.7z            # Compressed cleaned dataset
+├── proyecto_final.ipynb             # Main Jupyter Notebook
+├── proyecto_final_analisis_multivariable.qmd # Quarto document file
+├── index.html                       # HTML report output
+└── README.md
 ```
 
 ---
