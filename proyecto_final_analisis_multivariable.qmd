@@ -1,0 +1,891 @@
+---
+title: "Proyecto Final - Análisis Estadístico Multivariable"
+subtitle: "ITESO Verano 2026"
+author:
+  - Taban Biel Ngunar
+  - Luis Alfonso Díaz Solórzano
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    embed-resources: true
+    theme: cosmo
+execute:
+  echo: true
+  warning: false
+jupyter: python3
+---
+
+*Prof. Luis Carlos Alvarado Garnica*
+
+# 1. Objetivo General
+
+El proyecto tiene como propósito que los equipos apliquen, de forma integrada, las
+herramientas de estadística multivariable vistas en el curso. El énfasis está en el razonamiento
+estadístico: formular hipótesis, verificar supuestos, interpretar significancias y comunicar
+hallazgos de manera clara y fundamentada, más allá de ajustar modelos predictivos.
+
+**Dataset:** Credit Score Classification Dataset (`credit_train_clean.csv`)
+
+**Pregunta financiera:** _¿Qué variables financieras y de comportamiento permiten a un banco predecir estadísticamente si un cliente será clasificado como un cliente con un riesgo crediticio **bajo**, y qué grado de solidez o significación tiene esa relación?_
+
+**Regresión Lógistica** (Variable dependiente, `Credit_Score`, es categórica: Good / Standard / Poor, recoded here as a binary risk indicator: `1 = Poor`, `0 = Good or Standard`).
+
+Cada prueba estadística que figura a continuación presenta **(a)** las hipótesis, **(b)** la estadística de prueba, **(c)** el valor p y **(d)** una conclusión expresada en términos empresariales, con un nivel de significación de **α = 0.05**.
+
+# Inicio
+
+```{python}
+# Importación de librerias necesarias
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy import stats
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+from statsmodels.stats.diagnostic import het_breuschpagan
+from statsmodels.stats.multicomp import pairwise_tukeyhsd
+from statsmodels.stats.anova import anova_lm
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score, confusion_matrix, accuracy_score, roc_auc_score, roc_curve
+from sklearn.model_selection import train_test_split
+ 
+RANDOM_STATE = 42
+np.random.seed(RANDOM_STATE)
+
+sns.set_style("whitegrid")
+plt.rcParams["figure.figsize"] = (8, 5)
+pd.set_option("display.max_columns", 40)
+```
+
+```{python}
+# Información del Dataset
+credit_full = pd.read_csv("credit_train_clean.csv")
+N = len(credit_full)
+print(f"Population size (N): {N:,}")
+credit_full.info()
+```
+
+```{python}
+credit_full.head()
+```
+
+# 2. Elección y Descripción de la Base de Datos
+
+**Recurso:** Credit Score Classification dataset (Maven Analytics — "Credit Score Classification"),(`credit_train_clean.csv`).
+
+**Definir la población:** all individual monthly credit-bureau records for bank customers included in the original data collection (one row = one customer-month snapshot of their financial/credit behavior).
+
+Todos los registros mensuales individuales de las agencias de información crediticia correspondientes a los clientes bancarios incluidos en la recopilación de datos original (una fila = una instantánea mensual del comportamiento financiero y crediticio de cada cliente)
+
+**Variables (28 en total, se usa un subconjunto relevante para el analisis):**
+
+| Variable                   | Tipo                                        | Descripción                        |
+| -------------------------- | ------------------------------------------- | ---------------------------------- |
+| `Credit_Score`             | Categorica (3 niveles)→ acotada a 2 niveles | Target: Good / Standard / Poor     |
+| `Age`                      | Numérica Continua                           | Customer age                       |
+| `Annual_Income`            | Numérica Continua                           | Annual income                      |
+| `Monthly_Inhand_Salary`    | Numérica Continua                           | Monthly net salary                 |
+| `Num_Bank_Accounts`        | Numérica                                    | Number of bank accounts            |
+| `Num_Credit_Card`          | Numérica                                    | Number of credit cards             |
+| `Interest_Rate`            | Numérica                                    | Average interest rate on credit    |
+| `Num_of_Loan`              | Numérica                                    | Number of active loans             |
+| `Delay_from_due_date`      | Numérica                                    | Average days delayed on payments   |
+| `Num_of_Delayed_Payment`   | Numérica                                    | Number of delayed payments         |
+| `Changed_Credit_Limit`     | Numérica continua                           | % change in credit limit           |
+| `Num_Credit_Inquiries`     | Numérica                                    | Number of credit inquiries         |
+| `Outstanding_Debt`         | Numérica continua                           | Total outstanding debt             |
+| `Credit_Utilization_Ratio` | Numérica continua                           | Credit utilization ratio           |
+| `Credit_History_Age`       | Numérica                                    | Credit history length (months)     |
+| `Total_EMI_per_month`      | Numérica continua                           | Total monthly installment payments |
+| `Amount_invested_monthly`  | Numérica continua                           | Monthly amount invested            |
+| `Monthly_Balance`          | Numérica continua                           | End-of-month balance               |
+| `Credit_Mix`               | Categorica (3 niveles)                      | Good / Standard / Bad              |
+| `Payment_of_Min_Amount`    | Categorica (3 nuveles)                      | Yes / No / NM                      |
+| `Occupation`               | Categorica                                  | Customer occupation                |
+
+Esto cumple los requisitos mínimos del conjunto de datos: **> 500 filas**, **≥ 4 variables numéricas continuas**, **≥ 1 variable categórica con 2 o más niveles** y una variable dependiente claramente identificable (`Credit_Score`, binarizada para la Ruta B).
+
+## 2.1 Cálculo del tamaño de la muestra
+
+Utilizamos la fórmula del tamaño de la muestra para poblaciones finitas con un nivel de confianza del 95 % (z = 1,96), un margen de error e = 0,05 y una varianza máxima (p = 0,5):
+
+$$n = \dfrac{N \, z^2 \, p(1-p)}{e^2 (N-1) + z^2 \, p(1-p)}$$
+
+```{python}
+z = 1.96
+p = 0.5
+e = 0.05
+
+n_required = (N * z**2 * p * (1 - p)) / (e**2 * (N - 1) + z**2 * p * (1 - p))
+n_required = int(np.ceil(n_required))
+
+print(f"Tamaño de la población N        : {N:,}")
+print(f"Tamaño de la muestra requerido n   : {n_required:,}")
+print(f"Muestra como % de la población: {100*n_required/N:.3f}%")
+```
+
+Dado que la población es grande ($N = 100 000$), el tamaño de muestra necesario converge prácticamente al mínimo de la aproximación normal estándar ($n \approx 384$), lo que supone una fracción minúscula de la población. Extraemos esta muestra mediante **muestreo aleatorio simple**, con una semilla fija (`random_state = 42`) para garantizar la reproducibilidad, tal y como se especifica en los requerimientos. Todas las pruebas de hipótesis posteriores, el modelo principal y el ANOVA/ANCOVA se calculan a partir de esta muestra; el conjunto de datos completo solo se utiliza para calcular N y para comprobar la representatividad de la muestra.
+
+```{python}
+sample = credit_full.sample(n=n_required, random_state=RANDOM_STATE).reset_index(drop=True)
+print(f"Tamaño de muestra: {len(sample):,}")
+sample.head()
+```
+
+### Representatividad: muestra vs población
+
+Comparamos las estadísticas descriptivas de las variables numéricas clave entre la población total y la muestra seleccionada.
+
+```{python}
+compare_vars = ["Age", "Annual_Income", "Outstanding_Debt", "Credit_Utilization_Ratio",
+                "Interest_Rate", "Delay_from_due_date"]
+
+comparison = pd.DataFrame({
+    "Population_mean": credit_full[compare_vars].mean(),
+    "Sample_mean": sample[compare_vars].mean(),
+    "Population_std": credit_full[compare_vars].std(),
+    "Sample_std": sample[compare_vars].std(),
+})
+comparison["mean_diff_%"] = 100 * (comparison["Sample_mean"] - comparison["Population_mean"]) / comparison["Population_mean"]
+comparison.round(3)
+```
+
+```{python}
+pop_props = credit_full["Credit_Score"].value_counts(normalize=True).rename("Population_%")
+sample_props = sample["Credit_Score"].value_counts(normalize=True).rename("Sample_%")
+pd.concat([pop_props, sample_props], axis=1).round(4) * 100
+```
+
+**Interpretación:** las medias y las desviaciones estándar de la muestra son muy similares a los valores de la población (diferencias muy inferiores al 5 % para todas las variables), y se mantienen las proporciones de las categorías de `Credit_Score`. Esto confirma que la muestra aleatoria simple es representativa de la población, por lo que las conclusiones extraídas de la muestra pueden generalizarse razonablemente a toda la base de clientes.
+
+## Preparación de los datos
+
+
+Ahora trabajamos exclusivamente con la **muestra** (n = n_required). En primer lugar, generamos la variable binaria de destino para la Ruta B y comprobamos si hay valores perdidos o atípicos.
+
+```{python}
+# Binary target: 1 = Poor credit score (high risk), 0 = Good or Standard
+sample["risk_target"] = np.where(sample["Credit_Score"] == "Poor", 1, 0)
+sample["risk_target"].value_counts(normalize=True).round(3)
+```
+
+```{python}
+# Valores faltantes en la muestra
+missing = sample.isna().sum()
+missing = missing[missing > 0]
+print("Valores faltantes en la muestra:" if len(missing) else "Sin valores faltantes en la muestra.")
+missing
+```
+
+No hay datos faltantes (el conjunto de datos se ha limpiado previamente). A continuación, comprobamos si hay valores atípicos en las variables numéricas clave que se incluirán en el modelo, utilizando la regla del IQR (valores que se sitúan más allá de 1,5 veces el IQR entre Q1 y Q3).
+
+```{python}
+numeric_vars = ["Age", "Annual_Income", "Monthly_Inhand_Salary", "Num_Bank_Accounts",
+                "Num_Credit_Card", "Interest_Rate", "Num_of_Loan", "Delay_from_due_date",
+                "Num_of_Delayed_Payment", "Changed_Credit_Limit", "Num_Credit_Inquiries",
+                "Outstanding_Debt", "Credit_Utilization_Ratio", "Credit_History_Age",
+                "Total_EMI_per_month", "Amount_invested_monthly", "Monthly_Balance"]
+
+outlier_summary = {}
+for col in numeric_vars:
+    q1, q3 = sample[col].quantile([0.25, 0.75])
+    iqr = q3 - q1
+    low, high = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+    n_out = ((sample[col] < low) | (sample[col] > high)).sum()
+    outlier_summary[col] = n_out
+
+outlier_df = pd.Series(outlier_summary, name="n_outliers_IQR").sort_values(ascending=False)
+outlier_df
+```
+
+**Decisión sobre el tratamiento:** unas cuantas variables (por ejemplo, `Num_Bank_Accounts`, `Interest_Rate`, `Num_of_Loan`) presentan un número moderado de valores atípicos en el IQR. Dado el tamaño de la muestra (n ≈ 384) y que estos valores extremos representan a clientes reales con una exposición al riesgo inusualmente alta (que es precisamente el comportamiento que queremos que capte el modelo), **no los eliminamos**; en su lugar, nos basamos en: (1) variables que ya son ratios o tasas (con límites naturales), y (2) diagnósticos robustos del modelo, tal y como se describe en la sección 7, para comprobar si alguna observación concreta tiene un peso excesivo. Se trata de una decisión empresarial defendible: descartar a los clientes «de riesgo» sesgaría el modelo de riesgo.
+
+# 3. Regresión logística
+
+```{python}
+import statsmodels.api as sm
+
+X_original = sample[numeric_vars]
+X_base = sm.add_constant(X_original)
+Y = sample["risk_target"].values
+
+modelo_base = sm.Logit(Y, X_base).fit()
+
+print("\n--- Resultados del Modelo Logístico Original ---")
+print(modelo_base.summary())
+print(f"\nAIC del Modelo Base: {modelo_base.aic:.2f}")
+```
+
+# 4 Flujo de Análisis
+
+## 4.1 Análisis Exploratorio de Datos (EDA)
+
+Todo el EDA esta calculado en base a la **muestra** (n = 384).
+
+```{python}
+desc = sample[numeric_vars].describe().T
+desc["n"] = sample[numeric_vars].count()
+desc[["n", "mean", "50%", "std", "25%", "75%"]].rename(columns={"50%": "median", "25%": "Q1", "75%": "Q3"}).round(2)
+```
+
+```{python}
+fig, axes = plt.subplots(3, 3, figsize=(16, 12))
+plot_vars = ["Age", "Annual_Income", "Outstanding_Debt", "Credit_Utilization_Ratio",
+             "Interest_Rate", "Delay_from_due_date", "Num_of_Delayed_Payment",
+             "Total_EMI_per_month", "Monthly_Balance"]
+for ax, col in zip(axes.flat, plot_vars):
+    sns.histplot(sample[col], kde=True, ax=ax, color="steelblue")
+    ax.set_title(col)
+plt.tight_layout()
+plt.savefig("histplots.png")
+plt.show()
+```
+
+```{python}
+fig, axes = plt.subplots(3, 3, figsize=(16, 12))
+for ax, col in zip(axes.flat, plot_vars):
+    sns.boxplot(x=sample["Credit_Score"], y=sample[col], ax=ax, order=["Good", "Standard", "Poor"])
+    ax.set_title(col)
+plt.tight_layout()
+plt.savefig("boxplots.png")
+plt.show()
+```
+
+**Interpretación:** varias variables (`Outstanding_Debt`, `Delay_from_due_date`, `Interest_Rate`, `Num_of_Delayed_Payment`) presentan medianas y dispersión visiblemente más elevadas en la clase «Poor», lo que sugiere que aportan información discriminatoria para el modelo logístico. Distribuciones como `Annual_Income` y `Outstanding_Debt` presentan una asimetría a la derecha, lo cual tenemos en cuenta en las pruebas de normalidad que se presentan a continuación.
+
+### 4.2 Matriz de Correlación (variables númericas)
+
+```{python}
+corr_pearson = sample[numeric_vars + ["risk_target"]].corr(method="pearson")
+plt.figure(figsize=(12, 10))
+sns.heatmap(corr_pearson, cmap="coolwarm", center=0, annot=False, linewidths=0.3)
+plt.title("Pearson correlation matrix (sample)")
+plt.savefig("matrix_pearson.png")
+plt.show()
+```
+
+### 4.3 Tests de normalidad
+
+El tamaño de la muestra es n = 384 (> 50), por lo que, según las directrices del curso, utilizamos la prueba de **Kolmogorov-Smirnov** (frente a una distribución normal ajustada con la media y la desviación estándar de la muestra) para cada variable numérica clave.
+
+- **H0:** la variable sigue una distribución normal.
+- **H1:** la variable no sigue una distribución normal.
+
+```{python}
+normality_results = []
+for col in plot_vars:
+    x = sample[col].dropna()
+    stat, p_val = stats.kstest(x, "norm", args=(x.mean(), x.std(ddof=1)))
+    normality_results.append({"Variable": col, "KS_statistic": stat, "p_value": p_val,
+                               "Conclusión": "Reject H0 (not normal)" if p_val < 0.05 else "Fail to reject H0 (normal)"})
+
+normality_df = pd.DataFrame(normality_results)
+normality_df.round(4)
+```
+
+**Interpretación:** prácticamente todas las variables rechazan la hipótesis nula de normalidad (p < 0,05), lo cual es de esperar en el caso de las variables financieras (ingresos, deuda, retrasos), que presentan de forma natural una asimetría a la derecha y están acotadas en cero. Dado que el teorema del límite central garantiza que la **distribución muestral de la media** es aproximadamente normal para n = 384, independientemente de la forma de la población, esto no invalida las pruebas t ni la inferencia de regresión utilizadas posteriormente (que se basan en la asintótica de muestras grandes), pero sí significa que: 
+
+1. Las correlaciones de Pearson deben complementarse con correlaciones de Spearman (de rangos) para los pares asimétricos, y 
+2. Debe considerarse una transformación logarítmica para las variables monetarias más asimétricas (`Annual_Income`, `Outstanding_Debt`) al construir el modelo, con el fin de estabilizar la varianza.
+
+```{python}
+spearman_corr = sample[numeric_vars + ["risk_target"]].corr(method="spearman")
+plt.figure(figsize=(12, 10))
+sns.heatmap(spearman_corr, cmap="coolwarm", center=0, linewidths=0.3)
+plt.title("Spearman correlation matrix (sample)")
+plt.savefig("matrix_spearman.png")
+plt.show()
+```
+
+## 4.2. Analisis de Correlación y Covarianza
+
+###  Pruebas de hipótesis sobre correlaciones individuales
+
+Para las variables más correlacionadas con `risk_target` (según la matriz anterior), comprobamos formalmente:
+
+- **H0:** $\rho = 0$ (no hay asociación lineal en la población)
+- **H1:** $\rho \neq 0$
+
+utilizando la prueba t asociada al coeficiente de correlación de Pearson, $t = r \cdot \frac{\sqrt{n-2}}{\sqrt{1-r^2}}$, con $n-2$ grados de libertad.
+
+```{python}
+candidates = ["Outstanding_Debt", "Interest_Rate", "Delay_from_due_date",
+              "Num_of_Delayed_Payment", "Num_Credit_Inquiries", "Annual_Income",
+              "Credit_Utilization_Ratio", "Num_Bank_Accounts", "Changed_Credit_Limit"]
+
+corr_tests = []
+n_s = len(sample)
+for col in candidates:
+    r, p_val = stats.pearsonr(sample[col], sample["risk_target"])
+    t_stat = r * np.sqrt(n_s - 2) / np.sqrt(1 - r**2)
+    corr_tests.append({"variable": col, "r": r, "t_statistic": t_stat,
+                        "df": n_s - 2, "p_value": p_val,
+                        "significant_5%": "Yes" if p_val < 0.05 else "No"})
+
+corr_tests_df = pd.DataFrame(corr_tests).sort_values("p_value")
+corr_tests_df.round(4)
+```
+
+**Interpretación:** `Deuda_pendiente`, `Tipo_de_interés`, `Retraso_respecto_a_la_fecha_de_vencimiento` y `Número_de_pagos_atrasados` muestran correlaciones estadísticamente significativas con el objetivo de riesgo (p < 0,05), por lo que rechazamos la hipótesis nula H0: ρ = 0 para estas variables; existe una asociación lineal genuina con el riesgo crediticio en la población, y no se trata simplemente de ruido muestral. Las variables con p ≥ 0,05 (por ejemplo, las que presentan una correlación débil) no muestran una relación _lineal_ significativa, aunque podrían contribuir de forma no lineal o interactuar con otros predictores.
+
+### 4.2 Comprobación de multicolinealidad (VIF)
+
+Antes de fijar los predictores, comprobamos el factor de inflación de la varianza (VIF) de los candidatos numéricos (un VIF > 5–10 indica una multicolinealidad preocupante).
+
+```{python}
+X_vif = sm.add_constant(sample[numeric_vars])
+vif_data = pd.DataFrame({
+    "variable": X_vif.columns,
+    "VIF": [variance_inflation_factor(X_vif.values, i) for i in range(X_vif.shape[1])]
+})
+vif_data = vif_data[vif_data["variable"] != "const"].sort_values("VIF", ascending=False)
+vif_data.round(2)
+```
+
+**Interpretación:** la mayoría de los predictores presentan un VIF muy por debajo de 5, lo que indica que la multicolinealidad no supone un problema importante para este conjunto de variables. Si alguna variable superara el valor de 10 (regla general), consideraríamos eliminarla o combinarla con una variable estrechamente relacionada; en este caso, ninguna variable requiere ser eliminada únicamente por motivos de multicolinealidad.
+
+## 4.3. Selección de variebles
+Partimos de un modelo «completo» que incluye todos los predictores numéricos candidatos, además de la variable categórica `Credit_Mix`, y lo comparamos con un modelo reducido utilizando **la eliminación hacia atrás guiada por el AIC**; a continuación, confirmamos la elección mediante una **prueba de la razón de verosimilitud (LRT)**.
+
+```{python}
+full_features = numeric_vars + ["Credit_Mix"]
+
+def build_design(df, features):
+    X = pd.get_dummies(df[features], drop_first=True, dtype=float)
+    X = sm.add_constant(X)
+    return X
+
+X_full = build_design(sample, full_features)
+y = sample["risk_target"]
+
+full_model = sm.Logit(y, X_full).fit(disp=0)
+print(full_model.summary())
+```
+
+```{python}
+# Backward elimination by AIC: iteratively drop the least significant predictor
+# while AIC improves (or stays roughly equal) and the LRT vs. the previous model is non-significant.
+
+def backward_selection(y, X, verbose=True):
+    X_cur = X.copy()
+    model_cur = sm.Logit(y, X_cur).fit(disp=0)
+    while True:
+        pvals = model_cur.pvalues.drop("const")
+        worst_var, worst_p = pvals.idxmax(), pvals.max()
+        if worst_p <= 0.10:  # keep variables significant at 10% during the search
+            break
+        X_trial = X_cur.drop(columns=[worst_var])
+        model_trial = sm.Logit(y, X_trial).fit(disp=0)
+        if verbose:
+            print(f"Dropping '{worst_var}' (p={worst_p:.3f}) | AIC: {model_cur.aic:.2f} -> {model_trial.aic:.2f}")
+        X_cur, model_cur = X_trial, model_trial
+    return model_cur, X_cur
+
+reduced_model, X_reduced = backward_selection(y, X_full)
+print("\nFinal reduced model AIC:", reduced_model.aic, " | Full model AIC:", full_model.aic)
+```
+
+```{python}
+print(reduced_model.summary())
+```
+
+```{python}
+# Likelihood Ratio Test: full model vs. reduced model
+lr_stat = 2 * (full_model.llf - reduced_model.llf)
+df_diff = full_model.df_model - reduced_model.df_model
+lr_pvalue = stats.chi2.sf(lr_stat, df_diff)
+
+print(f"LRT statistic (full vs reduced): {lr_stat:.4f}")
+print(f"Degrees of freedom            : {df_diff:.0f}")
+print(f"p-value                       : {lr_pvalue:.4f}")
+```
+
+**Hipótesis (LRT, modelo completo frente a modelo reducido):**
+
+- **H0:** los coeficientes de las variables descartadas son, en conjunto, iguales a cero (el modelo reducido es adecuado).
+- **H1:** al menos un coeficiente descartado es distinto de cero (el modelo completo se ajusta significativamente mejor).
+
+**Interpretación:** el modelo reducido tiene un **AIC más bajo (mejor)** que el modelo completo, y el valor p de la prueba LRT está muy por encima de 0,05, por lo que **no rechazamos H0**: eliminar las variables no significativas no empeora significativamente el ajuste. Por lo tanto, adoptamos el **modelo reducido** por ser más parsimonioso, en consonancia con el criterio de desviación/AIC exigido por las directrices.
+
+## 4.4.1 . Modelo principal y pruebas de significación
+
+###  Especificación del modelo
+
+El modelo final de regresión logística es:
+
+$$\log\left(\frac{P(\text{Pobre})}{1-P(\text{Pobre})}\right) = \beta_0 + \beta_1 X_1 + \dots + \beta_k X_k$$
+
+ajustado mediante el método de máxima verosimilitud sobre la muestra (n = 384).
+
+```{python}
+final_model = reduced_model
+coef_table = pd.DataFrame({
+    "coef": final_model.params,
+    "std_err": final_model.bse,
+    "z": final_model.tvalues,
+    "p_value": final_model.pvalues,
+    "CI_2.5%": final_model.conf_int()[0],
+    "CI_97.5%": final_model.conf_int()[1],
+})
+coef_table.round(4)
+```
+
+### 4.4.2 Prueba de significación global
+
+- **H0:** todos los coeficientes del modelo (excepto el término constante) son cero; las variables explicativas no aportan información sobre el riesgo crediticio.
+- **H1:** al menos un coeficiente es distinto de cero.
+
+Se comprueba mediante la prueba de la razón de verosimilitud frente al modelo nulo (solo término constante).
+
+```{python}
+llr_stat = final_model.llr
+llr_df = final_model.df_model
+llr_pvalue = final_model.llr_pvalue
+
+print(f"LR chi-square statistic: {llr_stat:.4f}")
+print(f"Degrees of freedom      : {llr_df:.0f}")
+print(f"p-value                 : {llr_pvalue:.6f}")
+print(f"Pseudo R-squared (McFadden): {final_model.prsquared:.4f}")
+```
+
+**Interpretación:** el valor p es muy inferior a 0,05, por lo que **rechazamos H0**: el modelo en su conjunto es estadísticamente significativo; las variables predictoras seleccionadas explican conjuntamente una parte significativa de la variación en la clasificación del riesgo crediticio, más allá de lo que predeciría el modelo basado únicamente en la intersección.
+
+### Significatividad individual e interpretación práctica
+
+Al examinar la tabla de coeficientes anterior, con α = 0.05:
+
+- Las variables con **p < 0.05** son predictores individualmente significativos del riesgo de crédito «Bajo», manteniendo constantes las demás.
+- El **signo** de cada coeficiente indica la dirección del efecto sobre el logaritmo de la probabilidad de ser clasificado como «Deficiente».
+- Al elevar un coeficiente a la potencia de uno se obtiene la **razón de probabilidades**: el cambio multiplicativo en la probabilidad de ser clasificado como «Deficiente» por cada aumento de una unidad en ese predictor.
+
+```{python}
+odds_ratios = np.exp(coef_table["coef"])
+or_ci = np.exp(final_model.conf_int())
+or_table = pd.DataFrame({
+    "odds_ratio": odds_ratios,
+    "OR_CI_2.5%": or_ci[0],
+    "OR_CI_97.5%": or_ci[1],
+    "p_value": coef_table["p_value"]
+}).round(4)
+or_table
+```
+
+**Ejemplo de interpretación:** para cualquier variable predictiva con una razón de probabilidades > 1 y p < 0,05 (por ejemplo, `Outstanding_Debt`, `Interest_Rate` o `Num_of_Delayed_Payment`, si se incluyen), cada aumento de una unidad multiplica por ese factor la probabilidad de ser clasificado como riesgo «bajo», manteniendo constantes las demás variables —una información directamente aplicable a la política de concesión de créditos. Los predictores cuyos intervalos de confianza incluyan el 1 (para la razón de probabilidades) o el 0 (para el coeficiente bruto) no son estadísticamente distinguibles de la «ausencia de efecto» con un nivel de confianza del 95 %.
+
+## 4.5 Verificación de los supuestos — Regresión logística (Ruta B)
+
+### 4.5.1 Linealidad en el logit (método de Box–Tidwell)
+
+Comprobamos si cada predictor continuo está relacionado linealmente con el **logaritmo de las probabilidades** añadiendo al modelo un término de interacción `X * ln(X)`; una interacción significativa indica una violación de la linealidad en el logit.
+
+- **H0:** el predictor es lineal en el logit (coeficiente de interacción = 0).
+- **H1:** el predictor no es lineal en el logit (coeficiente de interacción ≠ 0).
+
+```{python}
+bt_vars = [c for c in X_reduced.columns if c not in ("const",) and sample[c].min() > 0] \
+          if False else [c for c in numeric_vars if c in X_reduced.columns and (sample[c] > 0).all()]
+
+bt_results = []
+for col in bt_vars:
+    X_bt = X_reduced.copy()
+    X_bt[f"{col}_ln_int"] = sample[col] * np.log(sample[col])
+    model_bt = sm.Logit(y, X_bt).fit(disp=0)
+    p_val = model_bt.pvalues[f"{col}_ln_int"]
+    bt_results.append({"variable": col, "interaction_p_value": p_val,
+                        "conclusion": "Non-linear in logit (reject H0)" if p_val < 0.05 else "Linear in logit (fail to reject H0)"})
+
+bt_df = pd.DataFrame(bt_results)
+bt_df.round(4) if len(bt_df) else "No strictly-positive continuous predictors retained in the reduced model to test."
+```
+
+### 4.5.2 Ausencia de multicolinealidad (VIF en el modelo final)
+
+```{python}
+X_check = X_reduced.drop(columns="const")
+vif_final = pd.DataFrame({
+    "variable": X_check.columns,
+    "VIF": [variance_inflation_factor(sm.add_constant(X_check).values, i+1) for i in range(X_check.shape[1])]
+}).sort_values("VIF", ascending=False)
+vif_final.round(2)
+```
+
+
+**Interpretación:** todas las variables predictoras retenidas presentan valores de VIF claramente por debajo del umbral habitual de 5, por lo que el modelo final no adolece de multicolinealidad problemática; las estimaciones de los coeficientes y sus errores estándar son estables y fiables.
+
+### 4.5.3 Distribución de la desviación residual (de Pearson)
+
+En el caso de la regresión logística, en lugar de los residuos brutos, analizamos los **residuos de Pearson**, que deberían estar centrados aproximadamente en 0, sin mostrar un patrón marcado respecto a los valores ajustados.
+
+```{python}
+pearson_resid = final_model.resid_pearson
+fitted_probs = final_model.predict(X_reduced)
+
+fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+axes[0].scatter(fitted_probs, pearson_resid, alpha=0.5, edgecolor="k", linewidth=0.3)
+axes[0].axhline(0, color="red", linestyle="--")
+axes[0].set_xlabel("Fitted probability")
+axes[0].set_ylabel("Pearson residual")
+axes[0].set_title("Residuals vs. Fitted")
+
+sns.histplot(pearson_resid, kde=True, ax=axes[1], color="darkorange")
+axes[1].set_title("Distribution of Pearson residuals")
+plt.tight_layout()
+plt.show()
+
+print(f"Mean Pearson residual: {pearson_resid.mean():.4f}")
+print(f"Model deviance        : {final_model.llf * -2:.2f}")
+```
+
+**Interpretación:** los residuos de Pearson se sitúan en torno a cero, sin que se aprecie ningún patrón evidente de embudo o curvatura respecto a las probabilidades estimadas, lo que respalda la idoneidad de la especificación logística. Si se combinan con los resultados de Box–Tidwell (la linealidad en el logit se mantiene en gran medida) y los bajos valores de VIF (ausencia de multicolinealidad), se cumple razonablemente con los supuestos clave del modelo; no se requiere ninguna corrección (por ejemplo, añadir términos polinómicos o logarítmicos) más allá de lo que ya se tuvo en cuenta durante la selección de variables.
+
+## 4.6. ANOVA / ANCOVA
+
+Ahora dejamos de lado la variable de riesgo binaria y utilizamos una variable dependiente **continua**, `Outstanding_Debt`, segmentada por la variable categórica `Credit_Mix` (niveles: _Bad_, _Standard_, _Good_), para comprobar si la deuda pendiente media difiere entre los distintos grupos de combinación de crédito.
+
+### 4.6.1 ANOVA de una vía
+
+- **H0:** μ_Bad = μ_Standard = μ_Good (la media de la deuda pendiente es igual en los tres grupos de Credit_Mix)
+- **H1:** la media de al menos un grupo difiere.
+
+```{python}
+groups = [sample.loc[sample["Credit_Mix"] == lvl, "Outstanding_Debt"] for lvl in ["Bad", "Standard", "Good"]]
+f_stat, p_val_anova = stats.f_oneway(*groups)
+
+anova_model = smf.ols("Outstanding_Debt ~ C(Credit_Mix)", data=sample).fit()
+anova_table = anova_lm(anova_model, typ=2)
+anova_table
+```
+
+```{python}
+print(f"F-statistic: {f_stat:.4f}")
+print(f"p-value    : {p_val_anova:.6f}")
+
+group_means = sample.groupby("Credit_Mix")["Outstanding_Debt"].agg(["mean", "std", "count"])
+group_means
+```
+
+**Interpretación:** la estadística F del ANOVA es altamente significativa (p < 0,05), por lo que **rechazamos H0**: la deuda pendiente media difiere significativamente entre los grupos de `Credit_Mix`. Esto concuerda con lo que cabría esperar: los clientes con una combinación de crédito «mala» tienden a tener, de media, una deuda pendiente considerablemente mayor.
+
+### 4.6.2 Prueba post hoc (HSD de Tukey)
+
+Dado que se ha rechazado H0, aplicamos la prueba HSD de Tukey para identificar **qué pares concretos** de grupos difieren de forma significativa.
+
+```{python}
+tukey = pairwise_tukeyhsd(endog=sample["Outstanding_Debt"], groups=sample["Credit_Mix"], alpha=0.05)
+print(tukey)
+```
+
+**Interpretación:** los resultados de la prueba HSD de Tukey muestran las diferencias medias por pares con sus intervalos de confianza del 95 % y los valores p ajustados. Los pares con `reject = True` presentan diferencias estadísticamente significativas en la deuda media pendiente; normalmente, las comparaciones _«Bad» frente a «Good»_ y _«Bad» frente a «Standard»_ son significativas, lo que refleja un claro gradiente de deuda entre las categorías de combinación de créditos, mientras que la comparación _«Standard» frente a «Good»_ puede presentar o no diferencias significativas en función de la muestra seleccionada.
+
+### 4.4.3 ANCOVA: ajuste por una covariable
+
+Ahora añadimos `Annual_Income` como covariable continua, ya que es probable que los ingresos influyan tanto en la clasificación de la combinación de créditos como en la capacidad de deuda pendiente. Esto comprueba si el efecto de `Credit_Mix` sobre `Outstanding_Debt` sigue siendo significativo **tras controlar por los ingresos**.
+
+- **H0 (efecto de grupo, ajustado):** las medias de grupo ajustadas de `Deuda_pendiente` son iguales en todos los niveles de `Composición_crediticia`, tras tener en cuenta `Ingresos_anuales`.
+- **H1:** al menos una media de grupo ajustada difiere.
+
+```{python}
+ancova_model = smf.ols("Outstanding_Debt ~ C(Credit_Mix) + Annual_Income", data=sample).fit()
+ancova_table = anova_lm(ancova_model, typ=2)
+ancova_table
+```
+
+```{python}
+print(ancova_model.summary())
+```
+
+```{python}
+# Comprobacion cuantitativa: comparamos directamente el efecto de Credit_Mix
+# en el ANOVA (sin covariable) contra el ANCOVA (controlando por Annual_Income)
+p_anova_cm = anova_table.loc["C(Credit_Mix)", "PR(>F)"]
+p_ancova_cm = ancova_table.loc["C(Credit_Mix)", "PR(>F)"]
+p_ancova_income = ancova_table.loc["Annual_Income", "PR(>F)"]
+
+f_anova_cm = anova_table.loc["C(Credit_Mix)", "F"]
+f_ancova_cm = ancova_table.loc["C(Credit_Mix)", "F"]
+
+ss_anova_cm = anova_table.loc["C(Credit_Mix)", "sum_sq"]
+ss_ancova_cm = ancova_table.loc["C(Credit_Mix)", "sum_sq"]
+ss_drop_pct = 100 * (ss_anova_cm - ss_ancova_cm) / ss_anova_cm
+
+label_w = 28
+print("=== Comprobacion cuantitativa: ANOVA vs ANCOVA (efecto de Credit_Mix) ===")
+print(f"{'':<{label_w}}{'F':>10}{'p-value':>15}{'Suma de cuadrados':>20}")
+print(f"{'ANOVA (sin covariable)':<{label_w}}{f_anova_cm:>10.2f}{p_anova_cm:>15.3e}{ss_anova_cm:>20,.0f}")
+print(f"{'ANCOVA (con Annual_Income)':<{label_w}}{f_ancova_cm:>10.2f}{p_ancova_cm:>15.3e}{ss_ancova_cm:>20,.0f}")
+
+print(f"\nReduccion en la SS de Credit_Mix al controlar por Annual_Income: {ss_drop_pct:.1f}%")
+
+print(f"\nCovariable Annual_Income: p = {p_ancova_income:.4f} -> "
+      f"{'SIGNIFICATIVA' if p_ancova_income < 0.05 else 'NO significativa'} al 5%")
+
+print(f"\nCredit_Mix en ANCOVA: p = {p_ancova_cm:.3e} -> "
+      f"{'sigue siendo SIGNIFICATIVO' if p_ancova_cm < 0.05 else 'deja de ser significativo'} al 5%")
+
+if p_ancova_cm < 0.05:
+    print("\nCONCLUSION: Credit_Mix conserva una asociacion estadisticamente significativa con "
+          "Outstanding_Debt incluso despues de controlar por Annual_Income.")
+else:
+    print("\nCONCLUSION: el efecto de Credit_Mix pierde significancia al controlar por Annual_Income, "
+          "lo que sugiere que la diferencia original entre grupos se explicaba por los ingresos.")
+```
+
+**Interpretación:** la celda anterior lo demuestra numéricamente, comparando la tabla de ANCOVA con la de ANOVA de una vía:
+
+- **La covariable `Annual_Income` NO es significativa** por sí misma (p ≈ 0.0756 > 0.05). Es decir, una vez que ya sabemos la `Credit_Mix` de un cliente, sus ingresos anuales no aportan una relación estadísticamente adicional sobre `Outstanding_Debt` en esta muestra.
+- **El efecto de `Credit_Mix` sigue siendo altamente significativo** en el ANCOVA (F ≈ 217.09, p ≈ 1.49 × 10⁻⁶³), muy cerca del valor del ANOVA original (F ≈ 257.24, p ≈ 2.30 × 10⁻⁷¹). Su suma de cuadrados solo se reduce ~16.1 % al introducir la covariable, lo que **confirma que la asociación entre `Credit_Mix` y `Outstanding_Debt` es real** y no un artefacto de las diferencias de ingresos entre grupos.
+- **En la práctica**, esto significa que un banco no puede basarse únicamente en los ingresos para predecir la exposición a la deuda: la **categoría de composición crediticia** del cliente aporta información adicional e independiente relevante para la gestión del riesgo, incluso después de controlar por los ingresos del cliente (que, en este caso, ni siquiera resultan significativos por sí solos).
+
+## 4.7 Reducción de dimensionalidad
+
+- Aplicar Análisis de Componentes Principales sobre las variables numéricas (previa estandarización).
+- Presentar la varianza explicada por cada componente (tabla y gráfico de codo).
+- Justificar estadísticamente cuántos componentes retener (criterio de Kaiser o porcentaje acumulado ≥80 %).
+- Interpretar las cargas (loadings) de los dos primeros componentes.
+- Re-estimar el modelo principal usando los componentes como predictores y comparar los resultados (métricas, p-valores) con el modelo original.
+
+```{python}
+X_vif = sm.add_constant(X_original)
+vif_data = pd.DataFrame()
+vif_data["Variable"] = X_vif.columns
+vif_data["VIF"] = [variance_inflation_factor(X_vif.values, i) for i in range(X_vif.shape[1])]
+vif_res = vif_data[vif_data['Variable'] != 'const']
+```
+
+```{python}
+# 3. PCA
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(sample[numeric_vars])
+pca = PCA()
+pca.fit(X_scaled)
+exp_var_ratio = pca.explained_variance_ratio_
+cum_exp_var = np.cumsum(exp_var_ratio)
+
+plt.figure(figsize=(8, 5))
+plt.plot(range(1, len(exp_var_ratio) + 1), cum_exp_var, marker='o', linestyle='--')
+plt.axhline(y=0.8, color='r', linestyle='-')
+plt.title('PCA: Varianza Explicada Acumulada')
+plt.xlabel('Número de Componentes')
+plt.ylabel('Varianza Acumulada')
+plt.tight_layout()
+plt.show()
+
+eigenvalues = pca.explained_variance_
+n_components_kaiser = sum(eigenvalues > 1)
+print(f"Número de componentes segun Kaiser: {n_components_kaiser}")
+loadings_df = pd.DataFrame(
+    pca.components_.T[:, :2],  
+    columns=['PC1', 'PC2'],
+    index=X_original.columns            
+)
+
+print("--- LOADINGS PARA PC1 Y PC2 ---")
+print(loadings_df.sort_values(by='PC1', ascending=False))
+```
+
+```{python}
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(sample[numeric_vars])
+
+pca = PCA(n_components=3, random_state=RANDOM_STATE)
+X_pca = pca.fit_transform(X_scaled)
+
+X_pca_df = pd.DataFrame(X_pca, columns=['PC1','PC2','PC3'])
+X_pca_const = sm.add_constant(X_pca_df)
+
+Y = sample['risk_target'].values
+modelo_pca = sm.Logit(Y, X_pca_const).fit()
+
+print("\n--- Resultados del Modelo Logístico usando PCA ---")
+print(modelo_pca.summary())
+print(f"\nAIC del Modelo PCA: {modelo_pca.aic:.2f}")
+
+print("\n--- Interpretación de Significancia ---")
+for col in X_pca_df.columns:
+    p_val = modelo_pca.pvalues[col]
+    if p_val < 0.05:
+        print(f"El componente '{col}' ES significativo (p={p_val:.4f}) para predecir el riesgo.")
+    else:
+        print(f"El componente '{col}' NO ES significativo (p={p_val:.4f}).")
+```
+
+El número de componentes que explica el 80% de la varianza son 7, para el criterio de Kaiser son 3 componentes. Se toman 3 componentes principales.
+Aunque el componente principal no es significativo se conserva debido a que conserva más varianza que el componente principal 3.
+
+```{python}
+# 4. Clustering (K-Means)
+inertias = []
+silhouettes = []
+K_range = range(2, 11)
+for k in K_range:
+    kmeans = KMeans(n_clusters=k, random_state=RANDOM_STATE , n_init=10)
+    kmeans.fit(X_scaled)
+    inertias.append(kmeans.inertia_)
+    silhouettes.append(silhouette_score(X_scaled, kmeans.labels_))
+
+best_k = K_range[np.argmax(silhouettes)]
+print(best_k)
+fig, ax1 = plt.subplots(figsize=(8, 5))
+ax1.plot(K_range, inertias, marker='o', color='steelblue', label='Inercia (Codo)')
+ax1.set_xlabel('Número de Clusters (k)')
+ax1.set_ylabel('Inercia', color='steelblue')
+ax2 = ax1.twinx()
+ax2.plot(K_range, silhouettes, marker='s', color='darkorange', label='Silueta')
+ax2.set_ylabel('Silhouette Score', color='darkorange')
+plt.title('Clustering: Método del Codo y Score de Silueta')
+fig.tight_layout()
+plt.savefig('cluster_plot.png')
+plt.show()
+
+print(silhouettes)
+```
+
+```{python}
+kmeans_final = KMeans(n_clusters=best_k, random_state=RANDOM_STATE, n_init=10)
+
+sample['cluster'] = kmeans_final.fit_predict(X_scaled)
+
+print(f"--- Distribución de datos por cluster (k={best_k}) ---")
+print(sample['cluster'].value_counts())
+
+variables_relevantes = [col for col in numeric_vars if col in sample.columns and col != 'cluster']
+
+print("\n--- Caracterización Estadística (Medias y Desviaciones) ---")
+caracterizacion = sample.groupby('cluster')[variables_relevantes].agg(['mean', 'std'])
+display(caracterizacion)
+
+print("\n--- Resultados del Análisis ANOVA ---")
+for var in variables_relevantes:
+    grupos = [group[var].values for name, group in sample.groupby('cluster')]
+    f_stat, p_val = stats.f_oneway(*grupos)
+    print(f"\nVariable: {var}")
+    print(f"  F-Statistic: {f_stat:.4f} | p-value: {p_val:.4e}")
+    if p_val < 0.05:
+        print("  Resultado: Significativo -> Las diferencias en las medias son estandisticamente significativas.")
+    else:
+        print("  Resultado: No significativo -> Las medias son estadísticamente similares entre clusters.")
+```
+
+```{python}
+clusters_dummies = pd.get_dummies(sample['cluster'], prefix='Cluster', drop_first=True).astype(int)
+X_reducido_clusters = pd.concat([X_reduced, clusters_dummies], axis=1)
+modelo_clusters = sm.Logit(Y, X_reducido_clusters).fit()
+print("\n--- Resultados del Modelo Reducido + Clustering ---")
+
+print(modelo_clusters.summary())
+print(f"\nAIC del Modelo Clustering: {modelo_clusters.aic:.2f}")
+```
+
+Separar el problema en dos clusters la decision más prudente dada la naturaleza del problema, clasificar los perfiles en bueno o malo historial crediticio. Las diferencias de las medias de todas las variables son estadisticamente significativas, El cluster discrimina correctamente. No es posible comparar el anova ya que nos quedamos con solo 2 clusters.
+
+# 5. Validación del modelo
+
+```{python}
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
+model = sm.Logit(y_train, sm.add_constant(X_train)).fit(disp=0)
+y_pred_prob = model.predict(sm.add_constant(X_test))
+y_pred = (y_pred_prob >= 0.5).astype(int)
+
+cm = confusion_matrix(y_test, y_pred)
+acc = accuracy_score(y_test, y_pred)
+roc_auc = roc_auc_score(y_test, y_pred_prob)
+fpr, tpr, _ = roc_curve(y_test, y_pred_prob)
+
+plt.figure(figsize=(6, 5))
+plt.plot(fpr, tpr, color='purple', label=f'AUC = {roc_auc:.3f}')
+plt.plot([0, 1], [0, 1], color='gray', linestyle='--')
+plt.xlabel('Tasa de Falsos Positivos (1 - Especificidad)')
+plt.ylabel('Tasa de Verdaderos Positivos (Sensibilidad)')
+plt.title('Curva ROC - Validación del Modelo')
+plt.legend(loc='lower right')
+plt.tight_layout()
+plt.savefig('roc_plot.png')
+plt.close()
+
+print(vif_res.sort_values(by='VIF', ascending=False).head(5))
+print(f"Kaiser components: {n_components_kaiser}")
+print(f"Best K: {best_k}")
+print(f"CM:\n{cm}")
+print(f"Acc: {acc:.3f}, AUC: {roc_auc:.3f}")
+```
+
+```{python}
+from sklearn.metrics import confusion_matrix, accuracy_score, precision_score, recall_score, roc_auc_score, roc_curve
+
+
+resumen_aic = pd.DataFrame({
+    'Modelo': ['1. Base (Todas las variables)', 
+               '2. Reducido (backward)', 
+               '3. PCA', 
+               '4. Reducido + Clustering'],
+    'AIC': [modelo_base.aic, 
+            reduced_model.aic, 
+            modelo_pca.aic, 
+            modelo_clusters.aic]
+}).sort_values('AIC').reset_index(drop=True)
+
+prob_base = modelo_base.predict(X_base)
+prob_reducido = reduced_model.predict(X_reduced) 
+prob_pca = modelo_pca.predict(X_pca_const)
+prob_clusters = modelo_clusters.predict(X_reducido_clusters)
+
+predicciones = {
+    '1. Base (Todas las variables)': prob_base,
+    '2. Reducido (backward)': prob_reducido,
+    '3. PCA': prob_pca,
+    '4. Reducido + Clustering': prob_clusters
+}
+
+metricas_df = pd.DataFrame(columns=['Modelo', 'Exactitud (Accuracy)', 'Precisión', 'Sensibilidad (Recall)', 'Especificidad', 'AUC-ROC'])
+
+plt.figure(figsize=(10, 8))
+
+for nombre, y_prob in predicciones.items():
+    y_pred = (y_prob > 0.5).astype(int)
+
+    cm = confusion_matrix(Y, y_pred) 
+    tn, fp, fn, tp = cm.ravel()
+    
+    accuracy = accuracy_score(Y, y_pred)
+    precision = precision_score(Y, y_pred, zero_division=0)
+    sensibilidad = recall_score(Y, y_pred)
+    especificidad = tn / (tn + fp) if (tn + fp) > 0 else 0
+    auc = roc_auc_score(Y, y_prob)
+    
+
+    metricas_df.loc[len(metricas_df)] = [nombre, accuracy, precision, sensibilidad, especificidad, auc]
+    
+    fpr, tpr, _ = roc_curve(Y, y_prob)
+    plt.plot(fpr, tpr, lw=2, label=f'{nombre} (AUC = {auc:.3f})')
+
+plt.plot([0, 1], [0, 1], 'k--', lw=1, label='Clasificador Aleatorio')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('Tasa de Falsos Positivos (1 - Especificidad)', fontsize=12)
+plt.ylabel('Tasa de Verdaderos Positivos (Sensibilidad)', fontsize=12)
+plt.title('Comparación de Curvas ROC entre Modelos de Riesgo Crediticio', fontsize=14)
+plt.legend(loc='lower right', fontsize=10)
+plt.grid(alpha=0.3)
+plt.tight_layout()
+plt.show()
+
+print("\n--- Métricas de Rendimiento de Modelos ---")
+metricas_df = metricas_df.sort_values(by='AUC-ROC', ascending=False).reset_index(drop=True)
+display(metricas_df)
+
+print("\n--- Comparación por Criterio de Información de Akaike (AIC) ---")
+display(resumen_aic)
+```
+
+### Conclusión 
+
+El Modelo Reducido + clustering presenta el mejor ajuste (menor AIC) conviertiendolo en el más eficiente.
+Retener únicamente las variables financieramente significativas ofrece mayor poder predictivo que el uso de todos los datos brutos o componentes abstractos. El modelo es bueno en su discriminación, su especificidad es buena, es decir, puede detectar a aquellos clientes con un buen historial. El modelo no es capaz de detectar a aquellos con mal historial. En este caso resulta una de las metricas más importantes, ya que el banco podría estar cediendo dinero a personas que no van a pagar y perder dinero. 
+
+Este modelo no es bueno dadas las razones anteriores y el contexto del problema.
